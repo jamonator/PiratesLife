@@ -6,7 +6,8 @@ import java.util.Random;
 import java.awt.Point;
 
 public class Island {
-    int x, y, radius;
+    public final Faction faction;
+    public int x, y, radius;
     private int[] outlineX, outlineY;
     private static final Random rand = new Random();
 
@@ -16,7 +17,8 @@ public class Island {
     private Port port;
 
     // Randomizer constructor (pixel style, random spot)
-    public Island(int mapWidth, int mapHeight) {
+    public Island(int mapWidth, int mapHeight, Faction faction) { // Add faction param
+        this.faction = faction; // Set faction
         // Pixel-style radius (multiple of 8)
         this.radius = 40 + rand.nextInt(5) * 8;
         // Random position, avoid edges
@@ -27,10 +29,11 @@ public class Island {
     }
 
     // Manual constructor for fixed islands
-    public Island(int x, int y, int radius) {
+    public Island(int x, int y, int radius, Faction faction) { // Add faction param
         this.x = x;
         this.y = y;
         this.radius = radius;
+        this.faction = faction; // Set faction
         generateOutline();
         randomizeFeatures();
     }
@@ -176,10 +179,31 @@ public class Island {
 
         // 8. Draw trees (snapped)
         for (Tree tree : trees) tree.draw(g2);
+
+        // Draw port (assuming you have a Port or getPortLocation method)
+        Point port = getPortLocation();
+        // Draw the dock as before...
+
+        // Draw the faction flag at the port
+        Color factionColor = switch (faction) {
+            case RED -> Color.RED;
+            case BLUE -> Color.BLUE;
+            case GREEN -> Color.GREEN;
+            case YELLOW -> Color.YELLOW;
+            case PURPLE -> new Color(128, 0, 128);
+        };
+        g2.setColor(factionColor);
+        g2.fillRect(port.x - 6, port.y - 28, 12, 12); // flag square above dock
+        g2.setColor(Color.BLACK);
+        g2.drawRect(port.x - 6, port.y - 28, 12, 12); // flag border
+        // Optional: draw a flagpole
+        g2.setColor(new Color(120, 120, 120));
+        g2.fillRect(port.x - 1, port.y - 16, 2, 16);
     }
 
+    // Returns a point near the edge for respawn/port
     public Point getPortLocation() {
-        return new Point(port.x, port.y);
+        return new Point(x, y + radius + 18);
     }
 
     // --- Feature classes ---
@@ -265,5 +289,11 @@ public class Island {
 
             g2.setTransform(old);
         }
+    }
+
+    public boolean isLand(int px, int py) {
+        if (outlineX == null || outlineY == null) return false;
+        Polygon poly = new Polygon(outlineX, outlineY, outlineX.length);
+        return poly.contains(px, py);
     }
 }
