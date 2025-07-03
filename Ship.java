@@ -8,13 +8,14 @@ import java.awt.geom.AffineTransform;
 
 public class Ship {
     int x, y;
-    int size = 16;
+    int size = 16; // was 16, now slightly bigger
     int health = 10;
-    int maxHealth = 10; // or whatever your max health is
+    int maxHealth = 10;
     int cooldown = 0;
     Direction dir;
     private int tick = 0;
     private static final Random rand = new Random();
+    public final Faction faction; // Add this line
 
     // Cannon flash timing
     private int cannonFlashTick = 0;
@@ -35,7 +36,8 @@ public class Ship {
 
     private boolean attackMode = false;
 
-    public Ship(int x, int y, List<Island> islands) {
+    public Ship(int x, int y, List<Island> islands, Faction faction) { // Add faction param
+        this.faction = faction; // Set faction
         // Ensure ship does not spawn on an island or too close to border
         boolean valid;
         do {
@@ -65,6 +67,44 @@ public class Ship {
         this.dir = Direction.random();
     }
 
+    // For compatibility, you may want to keep the old constructor for rowboats/respawn:
+    public Ship(int x, int y, List<Island> islands) {
+        this(x, y, islands, Faction.RED); // Default to RED or random if needed
+    }
+
+    public Ship(int x, int y, List<Island> islands, Faction faction, boolean exactSpawn) {
+        this.faction = faction;
+        this.x = x;
+        this.y = y;
+        this.dir = Direction.random();
+        // No randomization if exactSpawn is true
+        if (!exactSpawn) {
+            boolean valid;
+            do {
+                valid = true;
+                // Check border
+                if (x - size / 2 < 16 || x + size / 2 > GamePanel.WIDTH - 16 ||
+                    y - size / 2 < 16 || y + size / 2 > GamePanel.HEIGHT - 16) {
+                    valid = false;
+                }
+                // Check islands
+                for (Island island : islands) {
+                    int dx = x - island.x;
+                    int dy = y - island.y;
+                    int minDist = size / 2 + island.radius + 24;
+                    if (dx * dx + dy * dy < minDist * minDist) {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (!valid) {
+                    x = 32 + rand.nextInt(GamePanel.WIDTH - 64);
+                    y = 32 + rand.nextInt(GamePanel.HEIGHT - 64);
+                }
+            } while (!valid);
+        }
+    }
+
     public void update(List<Ship> ships, List<Cannonball> cannonballs, List<Island> islands, List<HealthDrop> healthDrops) {
         tick++;
 
@@ -85,6 +125,7 @@ public class Ship {
         double minDist = Double.MAX_VALUE;
         for (Ship other : ships) {
             if (other == this) continue;
+            if (other.faction == this.faction) continue; // Only attack enemy factions
             double dist = Math.hypot(other.x - x, other.y - y);
             if (dist < minDist) {
                 minDist = dist;
@@ -186,16 +227,20 @@ public class Ship {
         int px = x - size / 2;
         int py = y - size / 2;
 
-        // Draw wake trail (optional, keep as is or shrink)
-        for (int i = 0; i < wakeTrail.size(); i++) {
-            WakeSegment seg = wakeTrail.get(i);
-            float alpha = 1.0f - (float)i / WAKE_MAX;
-            int width = 3;
-            int height = 1;
-            Color swellColor = new Color(120, 180, 230, (int)(alpha * 100));
-            g2.setColor(swellColor);
-            g2.fillRect(seg.x - width / 2, seg.y - height / 2, width, height);
-        }
+        // Faction outline
+        Color factionColor = switch (faction) {
+            case RED -> Color.RED;
+            case BLUE -> Color.BLUE;
+            case GREEN -> Color.GREEN;
+            case YELLOW -> Color.YELLOW;
+            case PURPLE -> new Color(128, 0, 128);
+        };
+
+        // Draw faction color square above the ship
+        g2.setColor(factionColor);
+        g2.fillRect(x - 4, y - size / 2 - 12, 8, 8);
+        g2.setColor(Color.BLACK);
+        g2.drawRect(x - 4, y - size / 2 - 12, 8, 8);
 
         // Pixel-art ship body (brown hull)
         g2.setColor(new Color(139, 69, 19));
@@ -221,8 +266,8 @@ public class Ship {
         g2.setColor(new Color(240, 240, 240));
         g2.fillRect(px + 6, py + 2, 4, 4);
 
-        // Flag (black)
-        g2.setColor(Color.BLACK);
+        // Flag (faction color)
+        g2.setColor(factionColor);
         g2.fillRect(px + 8, py + 1, 3, 1);
 
         // Cannons (dark gray dots)
@@ -244,11 +289,18 @@ public class Ship {
     public void destroy(List<Shipwreck> wrecks, List<Rowboat> rowboats, List<Island> islands) {
         // Spawn a shipwreck at the ship's position
         wrecks.add(new Shipwreck(x, y));
-        // Pick a random island for the rowboat to go to
-        Island targetIsland = islands.get(rand.nextInt(islands.size()));
-        rowboats.add(new Rowboat(x, y, targetIsland, islands));
-        // Remove or mark this ship as destroyed
-        // (e.g. set a flag or remove from the ships list in GamePanel)
+        // Find the island with the same faction as this ship
+        Island targetIsland = null;
+        for (Island island : islands) {
+            if (island.faction == this.faction) {
+                targetIsland = island;
+                break;
+            }
+        }
+        if (targetIsland != null) {
+            rowboats.add(new Rowboat(x, y, targetIsland, islands, this.faction));
+        }
+        // Remove or mark this ship as destroyed (handled in GamePanel)
     }
 
     // --- Shipwreck class with animation ---
@@ -307,151 +359,104 @@ public class Ship {
         boolean arrived = false;
         Ship respawnShip = null;
         int tick = 0;
-        double angle = 0;
-        Queue<Point> path = new LinkedList<>();
-        boolean pathFound = false;
+        Faction faction;
+        List<Point> waypoints = new LinkedList<>();
 
-        public Rowboat(int x, int y, Island targetIsland, List<Island> islands) {
+        public Rowboat(int x, int y, Island targetIsland, List<Island> islands, Faction faction) {
             this.x = x;
             this.y = y;
             this.targetIsland = targetIsland;
+            this.faction = faction;
             this.targetPort = targetIsland.getPortLocation();
-            // Calculate angle for animation
-            int dx = targetPort.x - x;
-            int dy = targetPort.y - y;
-            angle = Math.atan2(dy, dx);
-            // Find path around islands
-            this.path = findPath(x, y, targetPort.x, targetPort.y, islands);
-            this.pathFound = !path.isEmpty();
+            // Start with a direct path
+            waypoints.add(new Point(targetPort.x, targetPort.y));
+            // Optionally, you could add more advanced pathfinding here
         }
 
-        public void update() {
-            tick++;
-            if (arrived) return;
+        public void update(List<Ship> ships, List<Island> islands) {
+            if (arrived || waypoints.isEmpty()) return;
 
-            if (pathFound && !path.isEmpty()) {
-                Point next = path.peek();
-                int dx = next.x - x;
-                int dy = next.y - y;
-                double dist = Math.hypot(dx, dy);
+            Point next = waypoints.get(0);
+            int dx = next.x - x;
+            int dy = next.y - y;
+            double dist = Math.hypot(dx, dy);
+
+            // Try to move in small steps to avoid skipping through islands
+            int steps = (int)Math.ceil(dist / speed);
+            boolean blocked = false;
+            int nx = x, ny = y;
+
+            for (int i = 1; i <= steps; i++) {
+                int testX = x + (int)Math.round(dx * i / steps);
+                int testY = y + (int)Math.round(dy * i / steps);
+
+                for (Island island : islands) {
+                    if (island == targetIsland) continue;
+                    int minDist = 10 + island.radius;
+                    int idx = testX - island.x;
+                    int idy = testY - island.y;
+                    if (idx * idx + idy * idy < minDist * minDist) {
+                        blocked = true;
+                        // Generate a detour waypoint to the left or right of the island
+                        double angle = Math.atan2(dy, dx);
+                        double detourAngle = angle + (Math.random() > 0.5 ? Math.PI / 2 : -Math.PI / 2); // random left/right
+                        int detourDist = island.radius + 28;
+                        int wx = island.x + (int)(Math.cos(detourAngle) * detourDist);
+                        int wy = island.y + (int)(Math.sin(detourAngle) * detourDist);
+                        waypoints.add(0, new Point(wx, wy));
+                        break;
+                    }
+                }
+                if (blocked) break;
+                nx = testX;
+                ny = testY;
+            }
+
+            if (!blocked) {
                 if (dist < speed) {
                     x = next.x;
                     y = next.y;
-                    path.poll();
-                } else {
-                    x += (int)(speed * dx / dist);
-                    y += (int)(speed * dy / dist);
+                    waypoints.remove(0);
+                    if (waypoints.isEmpty()) {
+                        arrived = true;
+                        // Respawn a new ship at the port
+                        if (respawnShip == null) {
+                            ships.add(new Ship(x, y, islands, faction));
+                            respawnShip = ships.get(ships.size() - 1);
+                        }
+                    }
+                    return;
                 }
-                // Update angle for animation
-                if (dx != 0 || dy != 0) angle = Math.atan2(dy, dx);
-                if (path.isEmpty()) {
-                    arrived = true;
-                    x = targetPort.x;
-                    y = targetPort.y;
-                }
-            } else {
-                // Fallback: direct movement if no path found
-                int dx = targetPort.x - x;
-                int dy = targetPort.y - y;
-                double dist = Math.hypot(dx, dy);
-                if (dist < speed) {
-                    x = targetPort.x;
-                    y = targetPort.y;
-                    arrived = true;
-                } else {
-                    x += (int)(speed * dx / dist);
-                    y += (int)(speed * dy / dist);
-                }
-                if (dx != 0 || dy != 0) angle = Math.atan2(dy, dx);
+                x = nx;
+                y = ny;
+            } else if (arrived && respawnShip == null) {
+                // Always respawn at the port location of the target island
+                Point port = targetIsland.getPortLocation();
+                ships.add(new Ship(port.x, port.y, islands, faction, true)); // true = exact spawn
+                respawnShip = ships.get(ships.size() - 1);
             }
         }
 
         public void draw(Graphics g) {
-            Graphics2D g2 = (Graphics2D) g.create();
-            g2.translate(x, y);
-            g2.rotate(angle);
-
-            // Bobbing animation
-            int bob = (int)(Math.sin(tick * 0.18) * 2);
-
-            // Draw the path the rowboat is following (for debugging)
-            g2.setTransform(new AffineTransform()); // Reset transform to draw path in world coords
-            g2.setColor(Color.CYAN);
-            Point last = new Point(x, y);
-            for (Point p : path) {
-                g2.drawLine(last.x, last.y, p.x, p.y);
-                last = p;
+            Graphics2D g2 = (Graphics2D) g;
+            // Draw waypoints
+            g2.setColor(Color.YELLOW);
+            for (Point wp : waypoints) {
+                g2.fillOval(wp.x - 3, wp.y - 3, 6, 6);
             }
-
-            // Restore transform for drawing the boat
-            g2.translate(x, y);
-            g2.rotate(angle);
-
-            // Draw boat body (rectangle)
-            g2.setColor(new Color(160, 120, 60));
-            g2.fillRoundRect(-10, -4 + bob, 20, 8, 8, 8);
-
-            // Draw boat rim
-            g2.setColor(new Color(110, 80, 40));
-            g2.drawRoundRect(-10, -4 + bob, 20, 8, 8, 8);
-
-            g2.dispose();
-        }
-
-        // Add a more robust grid-based BFS pathfinding method:
-        private Queue<Point> findPath(int startX, int startY, int endX, int endY, List<Island> islands) {
-            int grid = 4; // finer grid for better accuracy
-            int w = GamePanel.WIDTH / grid;
-            int h = GamePanel.HEIGHT / grid;
-            boolean[][] visited = new boolean[w][h];
-            Point[][] prev = new Point[w][h];
-            Queue<Point> queue = new LinkedList<>();
-            int sx = startX / grid, sy = startY / grid;
-            int ex = endX / grid, ey = endY / grid;
-            queue.add(new Point(sx, sy));
-            visited[sx][sy] = true;
-
-            int[] dxs = {1, -1, 0, 0};
-            int[] dys = {0, 0, 1, -1};
-
-            while (!queue.isEmpty()) {
-                Point p = queue.poll();
-                if (p.x == ex && p.y == ey) break;
-                for (int d = 0; d < 4; d++) {
-                    int nx = p.x + dxs[d];
-                    int ny = p.y + dys[d];
-                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-                    if (visited[nx][ny]) continue;
-                    int px = nx * grid + grid / 2;
-                    int py = ny * grid + grid / 2;
-                    boolean blocked = false;
-                    for (Island island : islands) {
-                        int idx = px - island.x;
-                        int idy = py - island.y;
-                        int buffer = 18; // increased buffer for rowboat size and safety
-                        int minDist = island.radius + buffer;
-                        if (idx * idx + idy * idy < minDist * minDist) {
-                            blocked = true;
-                            break;
-                        }
-                    }
-                    if (!blocked) {
-                        visited[nx][ny] = true;
-                        prev[nx][ny] = p;
-                        queue.add(new Point(nx, ny));
-                    }
-                }
-            }
-
-            // Reconstruct path
-            LinkedList<Point> path = new LinkedList<>();
-            Point p = new Point(ex, ey);
-            if (!visited[ex][ey]) return path; // no path found
-            while (p != null && !(p.x == sx && p.y == sy)) {
-                path.addFirst(new Point(p.x * grid + grid / 2, p.y * grid + grid / 2));
-                p = prev[p.x][p.y];
-            }
-            return path;
+            // Simple brown rowboat
+            g2.setColor(new Color(139, 69, 19));
+            g2.fillRect(x - 6, y - 3, 12, 6);
+            // Faction color flag
+            Color factionColor = switch (faction) {
+                case RED -> Color.RED;
+                case BLUE -> Color.BLUE;
+                case GREEN -> Color.GREEN;
+                case YELLOW -> Color.YELLOW;
+                case PURPLE -> new Color(128, 0, 128);
+            };
+            g2.setColor(factionColor);
+            g2.fillRect(x + 2, y - 6, 4, 2);
         }
     }
 
