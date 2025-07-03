@@ -8,8 +8,9 @@ import java.awt.geom.AffineTransform;
 
 public class Ship {
     int x, y;
-    int size = 32;
+    int size = 16;
     int health = 10;
+    int maxHealth = 10; // or whatever your max health is
     int cooldown = 0;
     Direction dir;
     private int tick = 0;
@@ -64,8 +65,20 @@ public class Ship {
         this.dir = Direction.random();
     }
 
-    public void update(List<Ship> ships, List<Cannonball> cannonballs, List<Island> islands) {
+    public void update(List<Ship> ships, List<Cannonball> cannonballs, List<Island> islands, List<HealthDrop> healthDrops) {
         tick++;
+
+        // Health management: move towards nearest health drop if health is under 80%
+        if (this.health < 0.8 * this.maxHealth) {
+            HealthDrop nearest = findNearestHealthDrop(healthDrops, 400); // 400px range, adjust as needed
+            if (nearest != null) {
+                // Move toward the health drop
+                double angle = Math.atan2(nearest.y - this.y, nearest.x - this.x);
+                this.x += (int)(Math.cos(angle) * 2); // speed is 2 for health seeking
+                this.y += (int)(Math.sin(angle) * 2);
+                return; // Skip normal AI for this frame
+            }
+        }
 
         // Find nearest enemy ship
         Ship target = null;
@@ -122,8 +135,8 @@ public class Ship {
         if (attackMode && target != null && minDist < 100 && cooldown == 0) {
             cannonballs.add(new Cannonball(x, y, target));
             cooldown = 30;
-            cannonFlashTick = 5; // Show flash for 5 frames
-            firingCannon = rand.nextInt(4); // Pick a random cannon (0-3)
+            cannonFlashTick = 5;
+            firingCannon = rand.nextInt(4);
         }
 
         if (cannonFlashTick > 0) cannonFlashTick--;
@@ -170,105 +183,58 @@ public class Ship {
     public void draw(Graphics g) {
         Graphics2D g2 = (Graphics2D) g.create();
 
-        int bobOffset = (int)(Math.sin(tick * 0.1) * 2);
-        int sailOffset = (int)(Math.sin(tick * 0.15) * 2);
         int px = x - size / 2;
-        int py = y - size / 2 + bobOffset;
+        int py = y - size / 2;
 
-        // Draw wake trail using horizontal pixel swells (not rotated)
+        // Draw wake trail (optional, keep as is or shrink)
         for (int i = 0; i < wakeTrail.size(); i++) {
             WakeSegment seg = wakeTrail.get(i);
             float alpha = 1.0f - (float)i / WAKE_MAX;
-            int width = 6;
-            int height = 2;
+            int width = 3;
+            int height = 1;
             Color swellColor = new Color(120, 180, 230, (int)(alpha * 100));
             g2.setColor(swellColor);
             g2.fillRect(seg.x - width / 2, seg.y - height / 2, width, height);
         }
 
-        // Save the original transform
-        java.awt.geom.AffineTransform old = g2.getTransform();
-
-        // Flip horizontally if moving left
-        if (dir.dx < 0) {
-            g2.translate(x, 0);
-            g2.scale(-1, 1);
-            g2.translate(-x, 0);
-        }
-
-        // (No rotation for up/down, just draw as is)
-
-        // Shadow
-        g2.setColor(new Color(0, 0, 0, 40));
-        g2.fillOval(px + 6, py + 22, 20, 6);
-
-        // Hull (curved)
+        // Pixel-art ship body (brown hull)
         g2.setColor(new Color(139, 69, 19));
-        g2.fillRoundRect(px + 4, py + 12, 24, 12, 12, 12);
+        g2.fillRect(px + 3, py + 7, 10, 4);
 
-        // Bow (front curve)
-        g2.setColor(new Color(120, 60, 20));
-        g2.fillOval(px + 2, py + 12, 8, 12);
+        // Bow (front, lighter brown)
+        g2.setColor(new Color(181, 101, 29));
+        g2.fillRect(px + 2, py + 8, 2, 2);
 
-        // Stern (back curve)
-        g2.setColor(new Color(120, 60, 20));
-        g2.fillOval(px + 22, py + 12, 8, 12);
-
-        // Plank line
+        // Stern (back, darker brown)
         g2.setColor(new Color(100, 50, 10));
-        g2.drawLine(px + 6, py + 18, px + 26, py + 18);
+        g2.fillRect(px + 12, py + 8, 2, 2);
 
-        // Deck line
-        g2.setColor(new Color(160, 82, 45));
-        g2.drawLine(px + 5, py + 16, px + 27, py + 16);
+        // Deck (lighter stripe)
+        g2.setColor(new Color(205, 133, 63));
+        g2.fillRect(px + 5, py + 9, 6, 1);
 
-        // Rudder
-        g2.setColor(Color.DARK_GRAY);
-        g2.fillRect(px + 14, py + 24, 4, 3);
+        // Mast (gray)
+        g2.setColor(new Color(120, 120, 120));
+        g2.fillRect(px + 7, py + 4, 2, 5);
 
-        // Mast shadow
-        g2.setColor(new Color(60, 60, 60, 80));
-        g2.fillRect(px + 16, py + 4, 2, 10);
+        // Sail (white)
+        g2.setColor(new Color(240, 240, 240));
+        g2.fillRect(px + 6, py + 2, 4, 4);
 
-        // Mast
-        g2.setColor(new Color(80, 80, 80));
-        g2.fillRect(px + 15, py + 4, 2, 10);
-
-        // Crow's nest
-        g2.setColor(new Color(110, 110, 110));
-        g2.fillRect(px + 13, py + 3, 6, 2);
-
-        // Sail (with outline)
-        g2.setColor(new Color(200, 220, 220));
-        g2.fillRect(px + 10 + sailOffset, py + 5, 10, 6);
-        g2.setColor(new Color(180, 180, 180));
-        g2.drawRect(px + 10 + sailOffset, py + 5, 10, 6);
-
-        // Flag
+        // Flag (black)
         g2.setColor(Color.BLACK);
-        g2.fillRect(px + 17, py + 1, 5, 2);
+        g2.fillRect(px + 8, py + 1, 3, 1);
 
-        // Cannons
-        g2.setColor(Color.BLACK);
-        g2.fillRect(px + 6, py + 15, 2, 2);
-        g2.fillRect(px + 12, py + 15, 2, 2);
-        g2.fillRect(px + 18, py + 15, 2, 2);
-        g2.fillRect(px + 24, py + 15, 2, 2);
+        // Cannons (dark gray dots)
+        g2.setColor(new Color(60, 60, 60));
+        g2.fillRect(px + 4, py + 11, 2, 2);
+        g2.fillRect(px + 10, py + 11, 2, 2);
 
-        // Cannon flash animation
-        if (cannonFlashTick > 0 && firingCannon >= 0) {
-            g2.setColor(new Color(255, 220, 100, 180));
-            int[][] flashes = { {px + 6, py + 15}, {px + 12, py + 15}, {px + 18, py + 15}, {px + 24, py + 15} };
-            int[] f = flashes[firingCannon];
-            g2.fillOval(f[0] - 2, f[1] - 2, 6, 6);
-        }
-
-        // Health bar (draw after restoring rotation so it's always upright)
-        g2.setTransform(old);
+        // Health bar (tiny, above ship)
         g2.setColor(Color.RED);
-        g2.fillRect(x - 10, y + size / 2, 20, 3);
+        g2.fillRect(x - 8, y - size / 2 - 4, 16, 2);
         g2.setColor(Color.GREEN);
-        g2.fillRect(x - 10, y + size / 2, 20 * health / 10, 3);
+        g2.fillRect(x - 8, y - size / 2 - 4, 16 * health / maxHealth, 2);
 
         g2.dispose();
     }
@@ -487,5 +453,21 @@ public class Ship {
             }
             return path;
         }
+    }
+
+    // --- New method to find nearest health drop ---
+    public HealthDrop findNearestHealthDrop(List<HealthDrop> healthDrops, int range) {
+        HealthDrop nearest = null;
+        int minDistSq = range * range;
+        for (HealthDrop drop : healthDrops) {
+            int dx = drop.x - this.x;
+            int dy = drop.y - this.y;
+            int distSq = dx * dx + dy * dy;
+            if (distSq < minDistSq) {
+                minDistSq = distSq;
+                nearest = drop;
+            }
+        }
+        return nearest;
     }
 }
