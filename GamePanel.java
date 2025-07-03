@@ -5,14 +5,15 @@ import java.util.Iterator;
 import java.util.List;
 
 public class GamePanel extends JPanel {
-    public static final int WIDTH = 1000;
-    public static final int HEIGHT = 800;
+    public static final int WIDTH = 1800;
+    public static final int HEIGHT = 1000;
     private List<Ship> ships = new ArrayList<>();
     private List<Cannonball> cannonballs = new ArrayList<>();
     private List<Swell> swells = new ArrayList<>();
     private List<Island> islands = new ArrayList<>();
     private List<Ship.Shipwreck> wrecks = new ArrayList<>();
     private List<Ship.Rowboat> rowboats = new ArrayList<>();
+    private List<HealthDrop> healthDrops = new ArrayList<>();
     private Timer timer;
 
     public GamePanel() {
@@ -20,7 +21,7 @@ public class GamePanel extends JPanel {
         setDoubleBuffered(true);
 
         // Create ships
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 10; i++) {
             ships.add(new Ship((int)(Math.random() * WIDTH), (int)(Math.random() * HEIGHT), islands));
         }
 
@@ -30,7 +31,7 @@ public class GamePanel extends JPanel {
         }
 
         // Create islands without overlap
-        int islandCount = 3;
+        int islandCount = 5;
         int maxTries = 100;
         for (int i = 0; i < islandCount; i++) {
             int tries = 0;
@@ -64,10 +65,11 @@ public class GamePanel extends JPanel {
 
         for (Iterator<Ship> it = ships.iterator(); it.hasNext(); ) {
             Ship ship = it.next();
-            ship.update(ships, cannonballs, islands);
+            ship.update(ships, cannonballs, islands, healthDrops); // pass healthDrops
             if (ship.health <= 0) {
+                healthDrops.add(new HealthDrop(ship.x, ship.y));
                 ship.destroy(wrecks, rowboats, islands);
-                it.remove(); // Remove the destroyed ship
+                it.remove();
             }
         }
 
@@ -97,6 +99,29 @@ public class GamePanel extends JPanel {
             }
         }
 
+        // Update health drops
+        for (Iterator<HealthDrop> it = healthDrops.iterator(); it.hasNext(); ) {
+            HealthDrop drop = it.next();
+            drop.update();
+            if (drop.isExpired()) it.remove();
+        }
+
+        // Ship collects health drop
+        for (Iterator<HealthDrop> it = healthDrops.iterator(); it.hasNext(); ) {
+            HealthDrop drop = it.next();
+            for (Ship ship : ships) {
+                int dx = ship.x - drop.x;
+                int dy = ship.y - drop.y;
+                int distSq = dx * dx + dy * dy;
+                int minDist = ship.size/2 + drop.size/2;
+                if (distSq < minDist * minDist) {
+                    ship.health = 10; // Fully heal the ship (set to max health)
+                    it.remove();
+                    break;
+                }
+            }
+        }
+
         cannonballs.removeIf(Cannonball::hasHitTarget);
 
         repaint();
@@ -116,6 +141,8 @@ public class GamePanel extends JPanel {
         for (Cannonball cb : cannonballs) cb.draw(g);
         for (Ship.Shipwreck wreck : wrecks) wreck.draw(g);
         for (Ship.Rowboat boat : rowboats) boat.draw(g);
+        // Draw health drops
+        for (HealthDrop drop : healthDrops) drop.draw(g);
     }
 
     private void drawOcean(Graphics g) {
