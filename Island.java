@@ -115,7 +115,7 @@ public class Island {
                     }
                 }
                 if (!overlaps) {
-                    trees.add(new Tree(tx, ty, tw, th));
+                    trees.add(new Tree(tx, ty));
                     occupied.add(rect);
                     placed = true;
                 }
@@ -126,33 +126,55 @@ public class Island {
     public void draw(Graphics g) {
         Graphics2D g2 = (Graphics2D) g;
 
-        // Draw sand base (irregular, pixel style)
-        g2.setColor(new Color(224, 202, 142));
-        Polygon sand = new Polygon(outlineX, outlineY, outlineX.length);
-        g2.fillPolygon(sand);
+        // Snap island center to 16x16 grid
+        int gx = (x / 16) * 16;
+        int gy = (y / 16) * 16;
+        int gr = (radius / 16) * 16;
 
-        // Draw grass patch (smaller, also pixel style, more blobby)
-        int points = outlineX.length;
-        int[] grassX = new int[points];
-        int[] grassY = new int[points];
-        for (int i = 0; i < points; i++) {
-            double dx = outlineX[i] - x;
-            double dy = outlineY[i] - y;
-            grassX[i] = x + (int)(dx * 0.7);
-            grassY[i] = y + (int)(dy * 0.7);
-            grassX[i] = (grassX[i] / 4) * 4;
-            grassY[i] = (grassY[i] / 4) * 4;
+        // 1. Water outline (snapped)
+        g2.setColor(new Color(80, 140, 200));
+        g2.fillRect(gx - gr - 16, gy - gr - 16, (gr + 16) * 2, (gr + 16) * 2);
+
+        // 2. Main sand body (blocky, snapped)
+        g2.setColor(new Color(222, 202, 142));
+        for (int dx = -gr; dx < gr; dx += 16) {
+            for (int dy = -gr; dy < gr; dy += 16) {
+                int dist = (int)Math.sqrt(dx*dx + dy*dy);
+                if (dist < gr - 8) {
+                    g2.fillRect(gx + dx, gy + dy, 16, 16);
+                }
+            }
         }
-        g2.setColor(new Color(120, 180, 90));
-        g2.fillPolygon(grassX, grassY, points);
 
-        // Draw port (always present)
+        // 3. Grass border (blocky, snapped)
+        g2.setColor(new Color(106, 190, 48));
+        for (int dx = -gr; dx < gr; dx += 16) {
+            for (int dy = -gr; dy < gr; dy += 16) {
+                int dist = (int)Math.sqrt(dx*dx + dy*dy);
+                if (dist >= gr - 32 && dist < gr - 8) {
+                    g2.fillRect(gx + dx, gy + dy, 16, 16);
+                }
+            }
+        }
+
+        // 4. Pixel-art rocks (snapped)
+        g2.setColor(new Color(120, 120, 120));
+        g2.fillRect(gx - 16, gy + 16, 8, 8);
+        g2.fillRect(gx + 16, gy - 16, 8, 8);
+
+        // 5. Pixel-art palm (snapped)
+        g2.setColor(new Color(139, 69, 19));
+        g2.fillRect(gx + 16, gy - 32, 8, 16); // trunk
+        g2.setColor(new Color(106, 190, 48));
+        g2.fillRect(gx + 8, gy - 40, 16, 8); // leaves
+
+        // 6. Draw port (snapped)
         port.draw(g2);
 
-        // Draw houses
+        // 7. Draw houses (snapped)
         for (House house : houses) house.draw(g2);
 
-        // Draw trees
+        // 8. Draw trees (snapped)
         for (Tree tree : trees) tree.draw(g2);
     }
 
@@ -163,19 +185,22 @@ public class Island {
     // --- Feature classes ---
 
     private static class Tree {
-        int x, y, w, h;
-        Tree(int x, int y, int w, int h) {
-            this.x = x; this.y = y; this.w = w; this.h = h;
+        int x, y;
+        Tree(int x, int y) {
+            this.x = (x / 16) * 16;
+            this.y = (y / 16) * 16;
         }
         void draw(Graphics2D g2) {
-            // Trunk (pixel style)
+            // Trunk (2x6)
             g2.setColor(new Color(120, 80, 40));
-            g2.fillRect(x + w / 2 - 2, y + h - 6, 4, 8);
-            // Leaves (blocky, Stardew-like)
+            g2.fillRect(x + 7, y + 10, 2, 6);
+            // Leaves (12x8)
             g2.setColor(new Color(70, 160, 70));
-            g2.fillRect(x, y, w, h);
+            g2.fillRect(x + 2, y + 2, 12, 8);
             g2.setColor(new Color(100, 200, 100));
-            g2.fillRect(x + 2, y + 2, w - 4, h - 4);
+            g2.fillRect(x + 4, y + 4, 8, 4);
+            g2.setColor(new Color(180, 255, 180));
+            g2.fillRect(x + 7, y + 5, 2, 2);
         }
     }
 
@@ -183,17 +208,24 @@ public class Island {
         int x, y;
         Color wall, roof;
         House(int x, int y) {
-            this.x = x; this.y = y;
-            wall = new Color(200 + rand.nextInt(30), 170 + rand.nextInt(30), 120 + rand.nextInt(30));
-            roof = rand.nextBoolean() ? new Color(180, 60, 60) : new Color(60, 120, 180);
+            this.x = (x / 16) * 16;
+            this.y = (y / 16) * 16;
+            wall = new Color(210, 180, 140);
+            roof = new Color(180, 60, 60);
         }
         void draw(Graphics2D g2) {
+            // Walls (12x8)
             g2.setColor(wall);
-            g2.fillRect(x, y, 12, 12);
+            g2.fillRect(x + 2, y + 6, 12, 8);
+            // Roof (12x4)
             g2.setColor(roof);
-            g2.fillRect(x, y - 4, 12, 6);
+            g2.fillRect(x + 2, y + 2, 12, 4);
+            // Door (3x4)
             g2.setColor(new Color(90, 60, 40));
-            g2.fillRect(x + 4, y + 6, 4, 6);
+            g2.fillRect(x + 7, y + 10, 3, 4);
+            // Window (3x3)
+            g2.setColor(new Color(180, 220, 255));
+            g2.fillRect(x + 4, y + 8, 3, 3);
         }
     }
 
@@ -201,30 +233,36 @@ public class Island {
         int x, y;
         double angle;
         Port(int x, int y, double angle) {
-            this.x = x; this.y = y;
+            // Snap to 16x16 grid
+            this.x = (x / 16) * 16;
+            this.y = (y / 16) * 16;
             this.angle = angle;
         }
         void draw(Graphics2D g2) {
-            int dockW = 28, dockH = 10;
+            int dockW = 32; // twice the ship width
+            int dockH = 10; // taller for a bigger dock
+            int postW = 4, postH = 10;
 
-            // Save the original transform
             AffineTransform old = g2.getTransform();
-
-            // Draw dock rotated to face outward (away from island center)
             g2.translate(x, y);
-            g2.rotate(angle); // angle already points from center to dock (outward)
+            g2.rotate(angle);
+
+            // Dock body (blocky, Stardew style)
             g2.setColor(new Color(140, 110, 60));
             g2.fillRect(-dockW / 2, 0, dockW, dockH);
+
+            // Dock posts (blocky, grid-aligned)
             g2.setColor(new Color(110, 80, 40));
-            for (int i = 0; i < dockW; i += 7) {
-                g2.fillRect(-dockW / 2 + i, dockH - 2, 3, 6); // posts
-            }
-            g2.setColor(new Color(180, 140, 80));
-            for (int i = 0; i < dockW; i += 7) {
-                g2.drawLine(-dockW / 2 + i, 0, -dockW / 2 + i, dockH);
+            for (int i = -dockW / 2; i < dockW / 2; i += 8) {
+                g2.fillRect(i, dockH - 2, postW, postH);
             }
 
-            // Restore the original transform
+            // Plank lines (lighter color, grid-aligned)
+            g2.setColor(new Color(180, 140, 80));
+            for (int i = -dockW / 2; i < dockW / 2; i += 8) {
+                g2.drawLine(i + 2, 1, i + 2, dockH - 2);
+            }
+
             g2.setTransform(old);
         }
     }
