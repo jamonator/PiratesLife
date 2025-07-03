@@ -10,19 +10,21 @@ public class Cannonball {
     boolean exploded = false;
     Ship target;
 
-    private static final int MAX_RANGE = 220; // pixels
+    private static final int MAX_RANGE = 150; // pixels
 
     // Explosion animation state
     private int explosionTick = 0;
     private static final int EXPLOSION_DURATION = 12;
     private List<Debris> debrisList = new ArrayList<>();
+    private int splashTick = 0;
+    private static final int SPLASH_DURATION = 15;
 
     public Cannonball(int x, int y, Ship target) {
         this.x = x;
         this.y = y;
         this.target = target;
         double angle = Math.atan2(target.y - y, target.x - x);
-        double speed = 8;
+        double speed = 4;
         dx = (int) (Math.cos(angle) * speed);
         dy = (int) (Math.sin(angle) * speed);
         rangeLeft = MAX_RANGE;
@@ -34,7 +36,13 @@ public class Cannonball {
             for (Debris d : debrisList) d.move();
             return;
         }
-        if (hit) return;
+        if (hit) {
+            // If it's a splash, increment splashTick
+            if (rangeLeft <= 0 && splashTick < SPLASH_DURATION) {
+                splashTick++;
+            }
+            return;
+        }
         x += dx;
         y += dy;
         rangeLeft -= Math.sqrt(dx * dx + dy * dy);
@@ -50,7 +58,8 @@ public class Cannonball {
         // Splash if out of range
         if (rangeLeft <= 0 && !hit) {
             hit = true;
-            // Optionally: spawn a splash effect here
+            splashTick = 0; // Start splash animation
+            // Optionally: play splash sound here
         }
     }
 
@@ -68,7 +77,7 @@ public class Cannonball {
 
     public boolean hasHitTarget() {
         // Remove after explosion animation or splash
-        return (hit && !exploded) || (exploded && explosionTick > EXPLOSION_DURATION) || (hit && rangeLeft <= 0);
+        return (hit && !exploded && splashTick >= SPLASH_DURATION) || (exploded && explosionTick > EXPLOSION_DURATION);
     }
 
     public void draw(Graphics g) {
@@ -83,14 +92,22 @@ public class Cannonball {
 
             // Draw debris
             for (Debris d : debrisList) d.draw(g2);
-        } else if (hit && rangeLeft <= 0) {
-            // Draw splash
-            g.setColor(new Color(120, 180, 230, 180));
-            g.fillOval(x - 6, y - 3, 12, 6);
+        } else if (hit && rangeLeft <= 0 && splashTick < SPLASH_DURATION) {
+            // Draw animated splash
+            Graphics2D g2 = (Graphics2D) g;
+            int splashRadius = 4 + splashTick * 2;
+            int alpha = 180 - splashTick * 10;
+            if (alpha < 0) alpha = 0;
+            g2.setColor(new Color(120, 180, 230, alpha));
+            g2.fillOval(x - splashRadius / 2, y - splashRadius / 4, splashRadius, splashRadius / 2);
         } else if (!hit) {
             // Draw cannonball
-            g.setColor(Color.DARK_GRAY);
-            g.fillOval(x - 3, y - 3, 6, 6);
+            g.setColor(new Color(60, 60, 60));
+            g.fillRect(x - 2, y - 2, 4, 4);
+
+            // Optional: add a white highlight for a pixel-art shine
+            g.setColor(new Color(220, 220, 220));
+            g.fillRect(x - 1, y - 1, 1, 1);
         }
     }
 
