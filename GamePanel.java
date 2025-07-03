@@ -1,6 +1,7 @@
 import javax.swing.*;
 import java.awt.*;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
@@ -16,14 +17,14 @@ public class GamePanel extends JPanel {
     private List<HealthDrop> healthDrops = new ArrayList<>();
     private Timer timer;
 
+    private final int shipsPerFaction = 5; // Number of ships to spawn per faction
+
+    // Add pirates list
+    private List<Pirate> pirates = new ArrayList<>();
+
     public GamePanel() {
         setPreferredSize(new Dimension(WIDTH, HEIGHT));
         setDoubleBuffered(true);
-
-        // Create ships
-        for (int i = 0; i < 10; i++) {
-            ships.add(new Ship((int)(Math.random() * WIDTH), (int)(Math.random() * HEIGHT), islands));
-        }
 
         // Create swells
         for (int i = 0; i < 100; i++) {
@@ -33,12 +34,13 @@ public class GamePanel extends JPanel {
         // Create islands without overlap
         int islandCount = 5;
         int maxTries = 100;
+        Faction[] factions = Faction.values();
         for (int i = 0; i < islandCount; i++) {
             int tries = 0;
             Island newIsland;
             boolean overlaps;
             do {
-                newIsland = new Island(WIDTH, HEIGHT);
+                newIsland = new Island(WIDTH, HEIGHT, factions[i % factions.length]); // Pass faction
                 overlaps = false;
                 for (Island other : islands) {
                     int dx = newIsland.x - other.x;
@@ -53,6 +55,21 @@ public class GamePanel extends JPanel {
                 tries++;
             } while (overlaps && tries < maxTries);
             islands.add(newIsland);
+
+            for (int p = 0; p < 3; p++) { // 3 pirates per island
+                pirates.add(new Pirate(newIsland.x, newIsland.y, newIsland.radius, newIsland.faction));
+            }
+        }
+
+        // Create ships
+        for (Island island : islands) {
+            Point port = island.getPortLocation();
+            // Clamp spawn to be at least 16px from the border
+            int safeX = Math.max(16, Math.min(WIDTH - 16, port.x));
+            int safeY = Math.max(16, Math.min(HEIGHT - 16, port.y));
+            for (int j = 0; j < shipsPerFaction; j++) {
+                ships.add(new Ship(safeX, safeY, islands, island.faction, true)); // true = exact spawn
+            }
         }
     }
 
@@ -62,16 +79,32 @@ public class GamePanel extends JPanel {
     }
 
     private void updateGame() {
+        List<Ship> shipsToRemove = new ArrayList<>();
+        List<Ship> shipsToAdd = new ArrayList<>(); // <-- Add this line
 
-        for (Iterator<Ship> it = ships.iterator(); it.hasNext(); ) {
-            Ship ship = it.next();
-            ship.update(ships, cannonballs, islands, healthDrops); // pass healthDrops
+        for (Ship ship : ships) {
+            ship.update(ships, cannonballs, islands, healthDrops);
             if (ship.health <= 0) {
                 healthDrops.add(new HealthDrop(ship.x, ship.y));
-                ship.destroy(wrecks, rowboats, islands);
-                it.remove();
+                // Find the faction's island
+                Island base = null;
+                for (Island island : islands) {
+                    if (island.faction == ship.faction) {
+                        base = island;
+                        break;
+                    }
+                }
+                if (base != null) {
+                    Point port = base.getPortLocation();
+                    int safeX = Math.max(16, Math.min(WIDTH - 16, port.x));
+                    int safeY = Math.max(16, Math.min(HEIGHT - 16, port.y));
+                    shipsToAdd.add(new Ship(safeX, safeY, islands, ship.faction, true));
+                }
+                shipsToRemove.add(ship);
             }
         }
+        ships.removeAll(shipsToRemove);
+        ships.addAll(shipsToAdd); // <-- Add new ships after removal
 
         for (Cannonball cb : cannonballs) {
             cb.move();
@@ -81,34 +114,25 @@ public class GamePanel extends JPanel {
             s.update(WIDTH, HEIGHT);
         }
 
-        // Update wrecks and rowboats
+        // Update wrecks
         for (Iterator<Ship.Shipwreck> it = wrecks.iterator(); it.hasNext(); ) {
             Ship.Shipwreck wreck = it.next();
             wreck.update();
             if (wreck.life <= 0) it.remove();
         }
-        for (Iterator<Ship.Rowboat> it = rowboats.iterator(); it.hasNext(); ) {
-            Ship.Rowboat boat = it.next();
-            boat.update();
-            if (boat.arrived && boat.respawnShip == null) {
-                // Respawn a new ship at the port
-                Ship newShip = new Ship(boat.targetPort.x, boat.targetPort.y, islands);
-                ships.add(newShip);
-                boat.respawnShip = newShip;
-                it.remove(); // Remove rowboat after respawn
-            }
-        }
 
-        // Update health drops
-        for (Iterator<HealthDrop> it = healthDrops.iterator(); it.hasNext(); ) {
-            HealthDrop drop = it.next();
+        // Update and remove expired health drops
+        List<HealthDrop> dropsToRemove = new ArrayList<>();
+        for (HealthDrop drop : healthDrops) {
             drop.update();
-            if (drop.isExpired()) it.remove();
+            if (drop.isExpired()) dropsToRemove.add(drop);
         }
 
         // Ship collects health drop
-        for (Iterator<HealthDrop> it = healthDrops.iterator(); it.hasNext(); ) {
-            HealthDrop drop = it.next();
+        Iterator<HealthDrop> dropIt = healthDrops.iterator();
+        while (dropIt.hasNext()) {
+            HealthDrop drop = dropIt.next();
+            boolean collected = false;
             for (Ship ship : ships) {
                 int dx = ship.x - drop.x;
                 int dy = ship.y - drop.y;
@@ -116,13 +140,26 @@ public class GamePanel extends JPanel {
                 int minDist = ship.size/2 + drop.size/2;
                 if (distSq < minDist * minDist) {
                     ship.health = 10; // Fully heal the ship (set to max health)
-                    it.remove();
+                    collected = true;
                     break;
                 }
             }
+            if (collected) dropIt.remove();
         }
 
+        // Remove expired drops
+        healthDrops.removeAll(dropsToRemove);
+
         cannonballs.removeIf(Cannonball::hasHitTarget);
+
+        for (int i = 0; i < islands.size(); i++) {
+            Island island = islands.get(i);
+            for (Pirate pirate : pirates) {
+                if (pirate.faction == island.faction) {
+                    pirate.update(island);
+                }
+            }
+        }
 
         repaint();
     }
@@ -143,6 +180,7 @@ public class GamePanel extends JPanel {
         for (Ship.Rowboat boat : rowboats) boat.draw(g);
         // Draw health drops
         for (HealthDrop drop : healthDrops) drop.draw(g);
+        for (Pirate pirate : pirates) pirate.draw(g);
     }
 
     private void drawOcean(Graphics g) {
